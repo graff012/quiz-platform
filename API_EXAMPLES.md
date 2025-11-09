@@ -1,6 +1,6 @@
 # 📡 API Examples
 
-Complete examples for testing all endpoints.
+complete examples for testing all endpoints.
 
 ## 🔐 Authentication
 
