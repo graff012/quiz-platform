@@ -1,4 +1,4 @@
-name: Deploy Backend To Server
+name: Deploy Backend to Server
 
 on:
   push:
