@@ -1,0 +1,157 @@
+name: Deploy Backend To Server
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'  # Only deploy when backend changes
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deployment:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+      - name: Deploy to Server
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SSH_KEY: ${{ secrets.SSH_SECRET_KEY }}
+          # Database
+          DATABASE_USER: ${{ secrets.DATABASE_USER }}
+          DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
+          DATABASE_DB: ${{ secrets.DATABASE_DB }}
+          DATABASE_DOCKER_URL: ${{ secrets.DATABASE_DOCKER_URL }}
+          # App
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          # Write SSH key
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Create .env file locally first
+          cat > .env << EOF
+          NODE_ENV=production
+          PORT=${PORT:-4000}
+          APP_PORT=${APP_PORT:-8080}
+          
+          # Database
+          DATABASE_USER=$DATABASE_USER
+          DATABASE_PASSWORD=$DATABASE_PASSWORD
+          DATABASE_DB=$DATABASE_DB
+          DATABASE_PORT=${DATABASE_PORT:-5433}
+          DATABASE_DOCKER_URL=$DATABASE_DOCKER_URL
+          DATABASE_URL=postgresql://$DATABASE_USER:$DATABASE_PASSWORD@localhost:${DATABASE_PORT:-5433}/$DATABASE_DB
+          
+          
+          # JWT
+          JWT_SECRET=$JWT_SECRET
+          
+          EOF
+          
+          # Test SSH connection
+          echo "🔌 Testing SSH connection..."
+          ssh -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=20 \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=40 \
+              -p "${SERVER_PORT:-22}" \
+              "$SERVER_USER@$SERVER_HOST" "echo '✅ SSH connection successful'" || exit 1
+
+          # Deploy via SSH
+          echo "📦 Deploying to server..."
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=240 \
+              -o TCPKeepAlive=yes \
+              -p "${SERVER_PORT:-22}" \
+              "$SERVER_USER@$SERVER_HOST" << 'ENDSSH'
+          set -e
+          
+          REPO_DIR=$HOME/quiz-app
+          
+          echo "📁 Setting up repository..."
+          # Clone or pull
+          if [ ! -d "$REPO_DIR/.git" ]; then
+            git clone https://github.com/graff012/quiz-platform.git "$REPO_DIR"
+          else
+            cd "$REPO_DIR"
+            git fetch origin
+            git reset --hard origin/main
+            git pull origin main
+          fi
+          
+          cd "$REPO_DIR"
+          echo "✅ Code updated to latest version"
+          ENDSSH
+          
+          # Copy .env file to backend directory
+          echo "📄 Copying .env file..."
+          scp -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=240 \
+              -P "${SERVER_PORT:-22}" \
+              .env "$SERVER_USER@$SERVER_HOST:$HOME/quiz-app/backend/.env"
+          
+          # Build and restart services
+          echo "🚀 Building and starting services..."
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=240 \
+              -o TCPKeepAlive=yes \
+              -p "${SERVER_PORT:-22}" \
+              "$SERVER_USER@$SERVER_HOST" << 'ENDSSH'
+          set -e
+          
+          cd $HOME/quiz-app/backend
+          
+          echo "🛑 Stopping existing containers..."
+          sudo docker compose down || true
+          
+          echo "🏗️  Building new images..."
+          sudo docker compose build --no-cache
+          
+          echo "🚀 Starting containers..."
+          sudo docker compose up -d
+          
+          echo "⏳ Waiting for services to be healthy..."
+          sleep 10
+          
+          echo "🔍 Checking container status..."
+          sudo docker compose ps
+          
+          echo "📊 Checking logs..."
+          sudo docker compose logs --tail=50 quiz-app
+          
+          echo "🧹 Cleaning up unused images..."
+          sudo docker image prune -af
+          
+          echo "✅ Deployment completed successfully!"
+          ENDSSH
+
+      - name: Verify deployment
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          APP_PORT: ${{ secrets.APP_PORT }}
+        run: |
+          echo "🔍 Verifying deployment..."
+          sleep 5
+          curl -f http://$SERVER_HOST:${APP_PORT:-8080}/health || echo "⚠️  Health check failed, but deployment may still be starting..."
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_rsa

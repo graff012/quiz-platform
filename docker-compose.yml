@@ -1,0 +1,35 @@
+name: my_compose_container_for_rozoviy_sad
+services:
+  nest-app:
+    build:
+      context: .
+    environment:
+      - DATABASE_URL=${DATABASE_DOCKER_URL}
+      - JWT_KEY=${JWT_SECRET}
+    env_file:
+      - .env
+    ports:
+      - '8080:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+  postgres:
+    image: postgres:17.5
+    environment:
+      - POSTGRES_USER=${DATABASE_USER}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+      - POSTGRES_DB=${DATABASE_DB}
+    env_file:
+      - .env
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  postgres_data:
+  my_volumes:
