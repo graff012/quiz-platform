@@ -1,12 +1,10 @@
-name: Deploy Backend to server
+name: Deploy Backend to Server
 
 on:
   push:
     branches:
+      - main
       - master
-    paths:
-      - 'backend/**'  # Only deploy when backend changes
-      - '.github/workflows/deploy.yml'
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
@@ -43,26 +41,6 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # Create .env file locally first
-          cat > .env << EOF
-          NODE_ENV=production
-          PORT=${PORT:-4000}
-          APP_PORT=${APP_PORT:-8080}
-          
-          # Database
-          DATABASE_USER=$DATABASE_USER
-          DATABASE_PASSWORD=$DATABASE_PASSWORD
-          DATABASE_DB=$DATABASE_DB
-          DATABASE_PORT=${DATABASE_PORT:-5433}
-          DATABASE_DOCKER_URL=$DATABASE_DOCKER_URL
-          DATABASE_URL=postgresql://$DATABASE_USER:$DATABASE_PASSWORD@localhost:${DATABASE_PORT:-5433}/$DATABASE_DB
-          
-          
-          # JWT
-          JWT_SECRET=$JWT_SECRET
-          
-          EOF
-          
           # Test SSH connection
           echo "🔌 Testing SSH connection..."
           ssh -o StrictHostKeyChecking=no \
@@ -79,45 +57,43 @@ jobs:
               -o ServerAliveCountMax=240 \
               -o TCPKeepAlive=yes \
               -p "${SERVER_PORT:-22}" \
-              "$SERVER_USER@$SERVER_HOST" << 'ENDSSH'
+              "$SERVER_USER@$SERVER_HOST" << ENDSSH
           set -e
           
-          REPO_DIR=$HOME/quiz-app
+          REPO_DIR=\$HOME/quiz-app
           
           echo "📁 Setting up repository..."
           # Clone or pull
-          if [ ! -d "$REPO_DIR/.git" ]; then
-            git clone https://github.com/graff012/quiz-platform.git "$REPO_DIR"
+          if [ ! -d "\$REPO_DIR/.git" ]; then
+            git clone https://github.com/graff012/quiz-platform.git "\$REPO_DIR"
           else
-            cd "$REPO_DIR"
+            cd "\$REPO_DIR"
             git fetch origin
-            git reset --hard origin/main
-            git pull origin main
+            git reset --hard origin/master
+            git pull origin master
           fi
           
-          cd "$REPO_DIR"
+          cd "\$REPO_DIR"
           echo "✅ Code updated to latest version"
-          ENDSSH
           
-          # Copy .env file to backend directory
-          echo "📄 Copying .env file..."
-          scp -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=240 \
-              -P "${SERVER_PORT:-22}" \
-              .env "$SERVER_USER@$SERVER_HOST:$HOME/quiz-app/backend/.env"
+          # Create .env file directly on server
+          echo "📄 Creating .env file..."
+          cat > .env << 'EOF'
+          NODE_ENV=production
+          PORT=4000
+          APP_PORT=8080
           
-          # Build and restart services
-          echo "🚀 Building and starting services..."
-          ssh -o StrictHostKeyChecking=no \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=240 \
-              -o TCPKeepAlive=yes \
-              -p "${SERVER_PORT:-22}" \
-              "$SERVER_USER@$SERVER_HOST" << 'ENDSSH'
-          set -e
+          # Database
+          DATABASE_USER=$DATABASE_USER
+          DATABASE_PASSWORD=$DATABASE_PASSWORD
+          DATABASE_DB=$DATABASE_DB
+          DATABASE_PORT=5433
+          DATABASE_DOCKER_URL=$DATABASE_DOCKER_URL
+          DATABASE_URL=postgresql://$DATABASE_USER:$DATABASE_PASSWORD@localhost:5433/$DATABASE_DB
           
-          cd $HOME/quiz-app/backend
+          # JWT
+          JWT_SECRET=$JWT_SECRET
+          EOF
           
           echo "🛑 Stopping existing containers..."
           sudo docker compose down || true
@@ -146,11 +122,10 @@ jobs:
       - name: Verify deployment
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          APP_PORT: ${{ secrets.APP_PORT }}
         run: |
           echo "🔍 Verifying deployment..."
           sleep 5
-          curl -f http://$SERVER_HOST:${APP_PORT:-8080}/health || echo "⚠️  Health check failed, but deployment may still be starting..."
+          curl -f http://$SERVER_HOST:8080/health || echo "⚠️  Health check failed, but deployment may still be starting..."
 
       - name: Clean up SSH key
         if: always()
