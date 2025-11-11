@@ -1,4 +1,4 @@
-name: my_compose_container_for_rozoviy_sad
+name: quiz_app
 services:
   nest-app:
     build:
