@@ -76,9 +76,9 @@ jobs:
           cd "\$REPO_DIR"
           echo "✅ Code updated to latest version"
           
-          # Create .env file directly on server
+          # Create .env file directly on server with variable expansion
           echo "📄 Creating .env file..."
-          cat > .env << 'EOF'
+          cat > .env << EOF
           NODE_ENV=production
           PORT=4000
           APP_PORT=8080
@@ -98,6 +98,13 @@ jobs:
           echo "🛑 Stopping existing containers..."
           sudo docker compose down || true
           
+          # Kill any process using port 5433
+          echo "🔓 Freeing up port 5433..."
+          sudo lsof -ti:5433 | xargs sudo kill -9 || true
+          
+          # Remove any orphaned containers
+          sudo docker ps -aq | xargs sudo docker rm -f || true
+          
           echo "🏗️  Building new images..."
           sudo docker compose build --no-cache
           
@@ -111,7 +118,7 @@ jobs:
           sudo docker compose ps
           
           echo "📊 Checking logs..."
-          sudo docker compose logs --tail=50 quiz-app
+          sudo docker compose logs --tail=50 nest-app
           
           echo "🧹 Cleaning up unused images..."
           sudo docker image prune -af
