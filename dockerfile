@@ -6,7 +6,7 @@ WORKDIR /app
 # Install system dependencies for build
 RUN apk add --no-cache python3 make g++
 
-RUN apk add --no-cache openssl1.1-compat
+RUN apk add --no-cache openssl libssl3
 
 # Copy package files
 COPY package*.json ./
