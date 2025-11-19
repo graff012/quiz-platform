@@ -103,6 +103,10 @@ jobs:
           
           # Remove any orphaned containers
           sudo docker ps -aq | xargs sudo docker rm -f || true
+
+          echo "🧹 Cleaning up Docker resourses..."
+          sudo docker system prune -af --volumes
+          sudo docker builder prune -af
           
           echo "🏗️  Building new images..."
           sudo docker compose build --no-cache
