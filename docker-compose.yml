@@ -13,6 +13,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:17.5
     environment:

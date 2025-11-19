@@ -30,6 +30,7 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
+RUN apk add --no-cache openssl libssl3
 # Copy package files
 COPY package*.json ./
 
