@@ -123,9 +123,6 @@ jobs:
           echo "📊 Checking logs..."
           sudo docker compose logs --tail=50 nest-app
           
-          echo "🧹 Cleaning up unused images..."
-          sudo docker image prune -af
-          
           echo "✅ Deployment completed successfully!"
           ENDSSH
 
