@@ -5,22 +5,39 @@ on:
     branches:
       - main
       - master
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
-  deployment:
+  build-and-push:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/quiz-app:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/quiz-app:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/quiz-app:buildcache,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Deploy to Server
         env:
@@ -28,20 +45,17 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           SSH_KEY: ${{ secrets.SSH_SECRET_KEY }}
-          # Database
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DATABASE_USER: ${{ secrets.DATABASE_USER }}
           DATABASE_PASSWORD: ${{ secrets.DATABASE_PASSWORD }}
           DATABASE_DB: ${{ secrets.DATABASE_DB }}
           DATABASE_DOCKER_URL: ${{ secrets.DATABASE_DOCKER_URL }}
-          # App
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
         run: |
-          # Write SSH key
           mkdir -p ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # Test SSH connection
           echo "🔌 Testing SSH connection..."
           ssh -o StrictHostKeyChecking=no \
               -o ConnectTimeout=20 \
@@ -50,89 +64,65 @@ jobs:
               -p "${SERVER_PORT:-22}" \
               "$SERVER_USER@$SERVER_HOST" "echo '✅ SSH connection successful'" || exit 1
 
-          # Deploy via SSH
           echo "📦 Deploying to server..."
           ssh -o StrictHostKeyChecking=no \
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=240 \
               -o TCPKeepAlive=yes \
               -p "${SERVER_PORT:-22}" \
-              "$SERVER_USER@$SERVER_HOST" << ENDSSH
+              "$SERVER_USER@$SERVER_HOST" bash << 'ENDSSH'
           set -e
           
-          REPO_DIR=\$HOME/quiz-app
+          REPO_DIR=$HOME/quiz-app
           
           echo "📁 Setting up repository..."
-          # Clone or pull
-          if [ ! -d "\$REPO_DIR/.git" ]; then
-            git clone https://github.com/graff012/quiz-platform.git "\$REPO_DIR"
+          if [ ! -d "$REPO_DIR/.git" ]; then
+            git clone https://github.com/graff012/quiz-platform.git "$REPO_DIR"
           else
-            cd "\$REPO_DIR"
+            cd "$REPO_DIR"
             git fetch origin
             git reset --hard origin/master
             git pull origin master
           fi
           
-          cd "\$REPO_DIR"
-          echo "✅ Code updated to latest version"
+          cd "$REPO_DIR"
           
-          # Create .env file directly on server with variable expansion
           echo "📄 Creating .env file..."
           cat > .env << EOF
           NODE_ENV=production
           PORT=4000
-          APP_PORT=8080
-          
-          # Database
           DATABASE_USER=$DATABASE_USER
           DATABASE_PASSWORD=$DATABASE_PASSWORD
           DATABASE_DB=$DATABASE_DB
           DATABASE_PORT=5432
           DATABASE_DOCKER_URL=$DATABASE_DOCKER_URL
-          
-          # JWT
           JWT_SECRET=$JWT_SECRET
+          DOCKER_IMAGE=$DOCKER_USERNAME/quiz-app:latest
           EOF
           
-          echo "🛑 Stopping existing containers..."
+          echo "🛑 Stopping containers..."
           sudo docker compose down || true
           
-          # Kill any process using port 5433
-          echo "🔓 Freeing up port 5433..."
-          sudo lsof -ti:5433 | xargs sudo kill -9 || true
-          
-          # Remove any orphaned containers
-          sudo docker ps -aq | xargs sudo docker rm -f || true
-
-          echo "🧹 Cleaning up Docker resourses..."
+          echo "🧹 Cleaning up..."
           sudo docker system prune -af --volumes
-          sudo docker builder prune -af
           
-          echo "🏗️  Building new images..."
-          sudo docker compose build 
+          echo "📥 Pulling latest image..."
+          sudo docker pull $DOCKER_USERNAME/quiz-app:latest
           
           echo "🚀 Starting containers..."
           sudo docker compose up -d
           
-          echo "⏳ Waiting for services to be healthy..."
-          sleep 10
+          echo "⏳ Waiting for services..."
+          sleep 15
           
-          echo "🔍 Checking container status..."
+          echo "🔍 Container status:"
           sudo docker compose ps
           
-          echo "📊 Checking logs..."
+          echo "📊 Logs:"
           sudo docker compose logs --tail=50 nest-app
           
-          echo "✅ Deployment completed successfully!"
+          echo "✅ Deployment completed!"
           ENDSSH
-
-      - name: Verify deployment
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-        run: |
-          echo "🔍 Verifying deployment..."
-          sleep 5
-          curl -f http://$SERVER_HOST:8080/health || echo "⚠️  Health check failed, but deployment may still be starting..."
 
       - name: Clean up SSH key
         if: always()
