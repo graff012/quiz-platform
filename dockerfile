@@ -70,4 +70,4 @@ RUN chown -R nodejs:nodejs /app
 USER nodejs
 
 # Run migrations and start app
-CMD npx prisma migrate deploy && node dist/main.js
+CMD npx prisma migrate deploy && node dist/src/main.js
