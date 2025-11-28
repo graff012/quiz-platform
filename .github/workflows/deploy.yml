@@ -69,35 +69,43 @@ jobs:
               -o ServerAliveCountMax=240 \
               -o TCPKeepAlive=yes \
               -p "${SERVER_PORT:-22}" \
-              "$SERVER_USER@$SERVER_HOST" bash << 'ENDSSH'
+              "$SERVER_USER@$SERVER_HOST" bash -s << EOF
           set -e
           
-          REPO_DIR=$HOME/quiz-app
+          # Export all variables for this session
+          export DATABASE_USER="${DATABASE_USER}"
+          export DATABASE_PASSWORD="${DATABASE_PASSWORD}"
+          export DATABASE_DB="${DATABASE_DB}"
+          export DATABASE_DOCKER_URL="${DATABASE_DOCKER_URL}"
+          export JWT_SECRET="${JWT_SECRET}"
+          export DOCKER_USERNAME="${DOCKER_USERNAME}"
+          
+          REPO_DIR=\$HOME/quiz-app
           
           echo "📁 Setting up repository..."
-          if [ ! -d "$REPO_DIR/.git" ]; then
-            git clone https://github.com/graff012/quiz-platform.git "$REPO_DIR"
+          if [ ! -d "\$REPO_DIR/.git" ]; then
+            git clone https://github.com/graff012/quiz-platform.git "\$REPO_DIR"
           else
-            cd "$REPO_DIR"
+            cd "\$REPO_DIR"
             git fetch origin
             git reset --hard origin/master
             git pull origin master
           fi
           
-          cd "$REPO_DIR"
+          cd "\$REPO_DIR"
           
           echo "📄 Creating .env file..."
-          cat > .env << 'EOF'
+          cat > .env << INNEREOF
           NODE_ENV=production
           PORT=4000
-          DATABASE_USER=$DATABASE_USER
-          DATABASE_PASSWORD=$DATABASE_PASSWORD
-          DATABASE_DB=$DATABASE_DB
+          DATABASE_USER=\${DATABASE_USER}
+          DATABASE_PASSWORD=\${DATABASE_PASSWORD}
+          DATABASE_DB=\${DATABASE_DB}
           DATABASE_PORT=5432
-          DATABASE_DOCKER_URL=$DATABASE_DOCKER_URL
-          JWT_SECRET=$JWT_SECRET
-          DOCKER_IMAGE=$DOCKER_USERNAME/quiz-app:latest
-          EOF
+          DATABASE_DOCKER_URL=\${DATABASE_DOCKER_URL}
+          JWT_SECRET=\${JWT_SECRET}
+          DOCKER_IMAGE=\${DOCKER_USERNAME}/quiz-app:latest
+          INNEREOF
           
           echo "🛑 Stopping containers..."
           sudo docker compose down || true
@@ -106,7 +114,7 @@ jobs:
           sudo docker system prune -af --volumes
           
           echo "📥 Pulling latest image..."
-          sudo docker pull $DOCKER_USERNAME/quiz-app:latest
+          sudo docker pull \${DOCKER_USERNAME}/quiz-app:latest
           
           echo "🚀 Starting containers..."
           sudo docker compose up -d
@@ -121,7 +129,7 @@ jobs:
           sudo docker compose logs --tail=50 nest-app
           
           echo "✅ Deployment completed!"
-          ENDSSH
+          EOF
 
       - name: Clean up SSH key
         if: always()
