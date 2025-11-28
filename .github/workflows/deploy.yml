@@ -3,7 +3,6 @@ name: Deploy Backend To Server
 on:
   push:
     branches:
-      - main
       - master
   workflow_dispatch:
 
